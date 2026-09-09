@@ -38,7 +38,7 @@ def test_llm_exception_surfaced(tmp_path):
     assert "propose_crash" in {e["event"] for e in report.events.events}
 
 
-def test_apply_exception_surfaced(tmp_path):
+def test_apply_exception_surfaced(tmp_path, monkeypatch):
     src = tmp_path / "x.py"
     src.write_text("x = 1\n")
     test = 'assert False, "FAIL"\n'
@@ -46,7 +46,8 @@ def test_apply_exception_surfaced(tmp_path):
     def bad_patcher(_tb: str) -> str:
         raise ValueError("boom in patcher")
 
-    report = heal(src, test, bad_patcher, max_attempts=1)
+    monkeypatch.setattr("self_healing.agent.apply_diff", bad_patcher)
+    report = heal(src, test, lambda _tb: "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-x = 1\n+x = 2\n", max_attempts=1)
     assert report.success is False
     assert "patcher crashed" in report.history[0].error
 
