@@ -24,13 +24,14 @@ def _classify(result: RunResult) -> str:
 
 
 def verify(test_code: str, timeout: float = 5.0) -> RunResult:
-    """Run `test_code`; success == exit code 0 and no 'FAIL' in output.
+    """Run `test_code`; success == exit code 0 and no 'FAIL' anywhere.
 
     The returned RunResult.stderr is prefixed with a `[class=...]` tag so the
     LLM proposer sees *why* it failed, not just the raw traceback.
     """
     result = run_code(test_code, timeout=timeout)
-    passed = result.exit_code == 0 and "FAIL" not in result.stdout
+    combined = (result.stdout or "") + (result.stderr or "")
+    passed = result.exit_code == 0 and "FAIL" not in combined
     if passed:
         return result
     kind = _classify(result)
