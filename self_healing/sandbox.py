@@ -42,12 +42,13 @@ def run_code(code: str, timeout: float = 5.0, memory_mb: int = 256) -> RunResult
     Memory limits are applied via RLIMIT_AS inside a preexec_fn so a limit
     breach kills only the child (returns exit -9) and never the host test
     process. Timeouts are caught and returned as RunResult(timed_out=True).
+
+    The wrapper uses textwrap.dedent(code).lstrip("\n") instead of
+    textwrap.dedent(f"\n{code}\n"): the latter shifts every line by one
+    level when the first line has no indent, producing IndentationError on
+    multi-line snippets like `from add import add\nassert ...`.
     """
-    wrapped = textwrap.dedent(
-        f"""
-        {code}
-        """
-    )
+    wrapped = textwrap.dedent(code).lstrip("\n")
     try:
         proc = subprocess.run(
             [sys.executable, "-c", wrapped],
