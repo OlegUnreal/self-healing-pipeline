@@ -10,13 +10,17 @@ class FakeResp:
 
 
 class FakeClient:
+    """Mimics openai.OpenAI: client.chat.completions.create(...)."""
+
     def __init__(self, contents):
         self._contents = list(contents)
         self.calls = 0
 
+    @property
     def chat(self):
         return self
 
+    @property
     def completions(self):
         return self
 
