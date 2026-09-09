@@ -33,17 +33,39 @@ def _validate_paths(diff: str, root: Path) -> bool:
     return True
 
 
+def _normalise_diff(diff: str, target: Path) -> str:
+    """Rewrite `a/<name>` / `b/<name>` headers to the target's real filename.
+
+    Models (and our own tests) emit diffs against `a/add.py` even when the
+    file lives at `/tmp/.../add.py`. `patch -p0` matches on the literal path,
+    so we strip the `a/`/`b/` prefix down to the basename.
+    """
+    out: list[str] = []
+    for line in diff.splitlines():
+        if line.startswith("--- ") or line.startswith("+++ "):
+            prefix = line[:4]
+            rest = line[4:]
+            name = rest.split("\t", 1)[0].strip()
+            m = _PATH_RE.match(name)
+            rel = m.group(1) if m else name.lstrip("/")
+            line = f"{prefix}{Path(rel).name}"
+        out.append(line)
+    return "\n".join(out) + "\n"
+
+
 def apply_diff(target: Path, diff: str) -> bool:
     """Apply `diff` to `target`. Returns True on success.
 
-    Strategy: validate paths, write the diff to a temp file, run `patch -p0`,
-    then syntax-check the result with `py_compile`. Roll back on any failure.
+    Strategy: validate paths, normalise headers to the target basename, write
+    the diff to a temp file, run `patch -p0` with cwd=target.parent, then
+    syntax-check with `py_compile`. Roll back on any failure.
     """
     if not diff or not diff.strip():
         return False
     if not _validate_paths(diff, target.parent):
         return False
 
+    diff = _normalise_diff(diff, target)
     backup = target.read_text(encoding="utf-8")
     with tempfile.NamedTemporaryFile("w", suffix=".diff", delete=False) as f:
         f.write(diff)

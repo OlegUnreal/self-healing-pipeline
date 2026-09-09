@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import re
 import time
-from typing import Callable
+from typing import Any, Callable
 
 
 SYSTEM = (
@@ -31,6 +31,46 @@ def _strip_fences(text: str) -> str:
     return text.strip()
 
 
+class _CompatClient:
+    """Normalises any injected client to the `client.chat.completions.create` shape.
+
+    Accepts:
+      * a real `openai.OpenAI` instance
+      * a stub exposing `.chat.completions.create(...)`
+      * a stub exposing `.chat()` / `.completions()` / `.create(...)` (legacy)
+      * a bare callable `(messages=...) -> str`
+    """
+
+    def __init__(self, client: Any):
+        self._raw = client
+
+    def create(self, **kwargs: Any) -> Any:
+        raw = self._raw
+        if hasattr(raw, "chat") and hasattr(raw.chat, "completions"):
+            return raw.chat.completions.create(**kwargs)
+        if callable(raw) and not hasattr(raw, "chat"):
+            msgs = kwargs.get("messages", [])
+            content = msgs[-1]["content"] if msgs else ""
+            out = raw(content)
+            text = out if isinstance(out, str) else str(out)
+            return type("R", (), {"choices": [type("C", (), {"message": type("M", (), {"content": text})()})()]})()
+        if hasattr(raw, "chat") and callable(raw.chat):
+            chat = raw.chat()
+            comp = chat.completions() if hasattr(chat, "completions") else chat
+            return comp.create(**kwargs)
+        if hasattr(raw, "create") and callable(raw.create):
+            return raw.create(**kwargs)
+        raise TypeError(f"unsupported client type: {type(raw)!r}")
+
+    @property
+    def chat(self) -> "_CompatClient":
+        return self
+
+    @property
+    def completions(self) -> "_CompatClient":
+        return self
+
+
 def make_openai_proposer(
     model: str = "gpt-4o-mini",
     max_retries: int = 3,
@@ -48,11 +88,13 @@ def make_openai_proposer(
             raise RuntimeError("pip install openai") from e
         client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
+    compat = _CompatClient(client)
+
     def propose_diff(traceback: str) -> str:
         last_err: Exception | None = None
         for attempt in range(1, max_retries + 1):
             try:
-                resp = client.chat.completions.create(
+                resp = compat.create(
                     model=model,
                     messages=[
                         {"role": "system", "content": SYSTEM},

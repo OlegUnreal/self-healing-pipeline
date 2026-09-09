@@ -35,7 +35,25 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str, ensure_ascii=False)
 
 
+class _KwargsLogger(logging.Logger):
+    """Logger that accepts arbitrary keyword arguments on info/warning/etc.
+
+    Standard logging.Logger rejects unknown kwargs, which breaks call sites
+    that pass structured fields like `attempt=n`. We swallow them into the
+    record so JsonFormatter can pick them up.
+    """
+
+    def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False,
+             stacklevel=1, **kwargs):
+        if kwargs:
+            extra = dict(extra or {})
+            extra.update(kwargs)
+        super()._log(level, msg, args, exc_info=exc_info, extra=extra,
+                     stack_info=stack_info, stacklevel=stacklevel + 1)
+
+
 def get_logger(name: str = "self_healing") -> logging.Logger:
+    logging.setLoggerClass(_KwargsLogger)
     logger = logging.getLogger(name)
     if not logger.handlers:
         handler = logging.StreamHandler(sys.stdout)

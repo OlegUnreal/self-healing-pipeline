@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import logging
+import os
+import signal
 import subprocess
 import sys
 import textwrap
@@ -21,20 +23,28 @@ class RunResult:
     error: str = ""
 
 
+def _preexec_limits(memory_mb: int) -> None:
+    """Drop privileges and cap memory inside the child. Runs in preexec_fn."""
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_AS, (memory_mb * 1024 * 1024, memory_mb * 1024 * 1024))
+    except (ValueError, OSError, ImportError):
+        pass
+    try:
+        os.setsid()
+    except (AttributeError, OSError):
+        pass
+
+
 def run_code(code: str, timeout: float = 5.0, memory_mb: int = 256) -> RunResult:
     """Execute `code` in a fresh interpreter. No network, no filesystem writes outside /tmp.
 
-    Catches OSError/PermissionError from the host side (e.g. missing interpreter,
-    permission denied) and returns them as a RunResult instead of raising, so the
-    repair loop never crashes on a sandbox setup failure.
+    Memory limits are applied via RLIMIT_AS inside a preexec_fn so a limit
+    breach kills only the child (returns exit -9) and never the host test
+    process. Timeouts are caught and returned as RunResult(timed_out=True).
     """
     wrapped = textwrap.dedent(
         f"""
-        import resource, sys
-        try:
-            resource.setrlimit(resource.RLIMIT_AS, ({memory_mb} * 1024 * 1024, {memory_mb} * 1024 * 1024))
-        except (ValueError, OSError):
-            pass  # some platforms disallow RLIMIT_AS; best-effort only
         {code}
         """
     )
@@ -44,6 +54,8 @@ def run_code(code: str, timeout: float = 5.0, memory_mb: int = 256) -> RunResult
             capture_output=True,
             text=True,
             timeout=timeout,
+            preexec_fn=lambda: _preexec_limits(memory_mb),
+            start_new_session=True,
         )
         return RunResult(proc.stdout, proc.stderr, proc.returncode, False)
     except subprocess.TimeoutExpired:
