@@ -1,8 +1,6 @@
 """Tests for the self-healing repair loop."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from self_healing.agent import heal
 from self_healing.verifier import verify
 
