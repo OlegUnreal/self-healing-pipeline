@@ -23,6 +23,7 @@ def test_empty_diff_is_skipped(tmp_path):
     assert report.success is True
     assert report.attempts == 2
     assert "return a + b" in report.final_source
+    assert report.events.events, "expected structured events"
 
 
 def test_llm_exception_surfaced(tmp_path):
@@ -35,4 +36,31 @@ def test_llm_exception_surfaced(tmp_path):
 
     report = heal(src, test, raiser, max_attempts=2)
     assert report.success is False
-    assert report.history[0].error == "api down"
+    assert report.history[0].error == "proposer failed: api down"
+    assert "propose_crash" in {e["event"] for e in report.events.events}
+
+
+def test_apply_exception_surfaced(tmp_path):
+    src = tmp_path / "x.py"
+    src.write_text("x = 1\n")
+    test = 'assert False, "FAIL"\n'
+
+    def bad_patcher(_tb: str) -> str:
+        raise ValueError("boom in patcher")
+
+    report = heal(src, test, bad_patcher, max_attempts=1)
+    assert report.success is False
+    assert "patcher crashed" in report.history[0].error
+
+
+def test_verify_crash_surfaced(tmp_path, monkeypatch):
+    src = tmp_path / "x.py"
+    src.write_text("x = 1\n")
+
+    def boom_verify(_test: str, timeout: float = 5.0):
+        raise RuntimeError("verifier down")
+
+    monkeypatch.setattr("self_healing.agent.verify", boom_verify)
+    report = heal(src, "assert False", lambda _tb: "", max_attempts=1)
+    assert report.success is False
+    assert "verifier crashed" in report.history[0].error
