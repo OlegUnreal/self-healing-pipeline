@@ -34,9 +34,9 @@ def test_strip_fences():
 
 
 def test_retries_then_returns():
-    client = FakeClient(["", "--- a/x\n+++ b/x\n"])
+    client = FakeClient(["", "--- a/x\n+++ b/x"])
     proposer = llm.make_openai_proposer(client=client)
-    assert proposer("tb") == "--- a/x\n+++ b/x\n"
+    assert proposer("tb") == "--- a/x\n+++ b/x"
     assert client.calls == 2
 
 
