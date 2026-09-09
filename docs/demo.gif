@@ -1,0 +1,13 @@
+GIF placeholder — replace with a real recording.
+
+Record with:
+
+```bash
+# macOS
+brew install --cask kap
+# or use asciinema + agg
+
+python -m self_healing --demo
+```
+
+Then convert the recording to GIF and commit it here.
