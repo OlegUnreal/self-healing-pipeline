@@ -7,7 +7,9 @@ from self_healing.agent import heal
 def test_empty_diff_is_skipped(tmp_path):
     src = tmp_path / "add.py"
     src.write_text("def add(a, b):\n    return a - b\n")
-    test = 'assert False, "FAIL"\n'
+    # The flaky proposer's second answer flips `-` to `+`, so the assertion
+    # must actually hold afterwards — `assert False` can never be healed.
+    test = 'assert add(2, 3) == 5\n'
     calls = {"n": 0}
 
     def flaky(_tb: str) -> str:
