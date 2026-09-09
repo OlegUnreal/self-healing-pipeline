@@ -57,7 +57,8 @@ def apply_diff(target: Path, diff: str) -> bool:
     """Apply `diff` to `target`. Returns True on success.
 
     Strategy: validate paths, normalise headers to the target basename, write
-    the diff to a temp file, run `patch -p0` with cwd=target.parent, then
+    the diff to a temp file, run `patch -p0 --directory <parent>` so patch
+    resolves the basename inside the target's own directory, then
     syntax-check with `py_compile`. Roll back on any failure.
     """
     if not diff or not diff.strip():
@@ -72,8 +73,16 @@ def apply_diff(target: Path, diff: str) -> bool:
         diff_path = f.name
     try:
         proc = subprocess.run(
-            ["patch", "-p0", "--forward", "--batch", "--input", diff_path],
-            cwd=target.parent,
+            [
+                "patch",
+                "-p0",
+                "--forward",
+                "--batch",
+                "--directory",
+                str(target.parent),
+                "--input",
+                diff_path,
+            ],
             capture_output=True,
             text=True,
         )
