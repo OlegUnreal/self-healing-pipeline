@@ -41,7 +41,7 @@ self_healing/
 | `agent.py` | Orchestrates the loop; skips empty diffs and LLM exceptions instead of crashing | Does not own sandbox/patcher/verifier internals |
 | `llm.py` | Retries transient errors, strips markdown fences, accepts an injectable client | Does not know about diffs or tests |
 
-## Quick start
+## How to run
 
 ```bash
 # 1. Clone
@@ -52,7 +52,7 @@ cd self-healing-pipeline
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
-# 3. Install
+# 3. Install dependencies
 pip install -r requirements.txt
 
 # 4a. Offline demo (no API key needed)
@@ -65,6 +65,22 @@ python -m self_healing --demo-llm
 # 5. Tests
 pytest -q
 ```
+
+Windows notes:
+
+- Activate with `.venv\Scripts\activate`.
+- `patch -p0` must be on PATH (Git for Windows ships it as `patch.exe`).
+- The sandbox uses `RLIMIT_AS`, which is a no-op on Windows — memory caps are best-effort there.
+
+## Libraries used and why
+
+| Library | Version | Why it is here |
+|---|---|---|
+| `openai` | `>=1.40` | Official OpenAI Python SDK. Gives a typed client, streaming, retries, and tool/function calling without hand-rolled HTTP. The `llm.py` module depends only on this interface, so swapping to another provider is a one-file change. |
+| `pytest` | `>=8.0` | The standard Python test runner. Used for unit tests of sandbox, patcher, verifier, and the agent loop. Fixtures make it trivial to inject a fake LLM client. |
+| `python-dotenv` | `>=1.0` | Loads `.env` into the environment so secrets never live in source. Read once at startup in `config.py`. |
+
+No other runtime dependencies on purpose: the sandbox shells out to the system `patch` and `python` binaries, and the agent is plain stdlib orchestration. Fewer dependencies means fewer supply-chain surprises and a smaller attack surface.
 
 ## Configuration
 
