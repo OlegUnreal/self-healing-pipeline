@@ -5,6 +5,7 @@ Requires OPENAI_API_KEY. Falls back to stub if missing.
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -32,14 +33,27 @@ def stub_proposer(traceback: str) -> str:
 
 
 def main() -> None:
-    proposer = make_openai_proposer() if os.environ.get("OPENAI_API_KEY") else stub_proposer
+    has_key = bool(os.environ.get("OPENAI_API_KEY"))
+    proposer = make_openai_proposer() if has_key else stub_proposer
+    mode = "OpenAI" if has_key else "stub (no OPENAI_API_KEY)"
+    print(f"mode: {mode}")
+
     with tempfile.TemporaryDirectory() as d:
         src = Path(d) / "add.py"
         src.write_text(BROKEN)
-        history = heal(src, TEST, proposer)
-        for a in history:
-            print(f"attempt {a.n}: passed={a.passed}")
-        print("final source:\n", src.read_text())
+        try:
+            report = heal(src, TEST, proposer)
+        except Exception as e:  # noqa: BLE001
+            print(f"healer crashed: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        for a in report.history:
+            tag = "PASS" if a.passed else "fail"
+            extra = f" err={a.error}" if a.error else ""
+            print(f"attempt {a.n}: {tag}{extra}")
+        print("success:", report.success)
+        print("final source:\n", report.final_source)
+        sys.exit(0 if report.success else 2)
 
 
 if __name__ == "__main__":
