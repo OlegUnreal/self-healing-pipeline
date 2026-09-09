@@ -1,8 +1,6 @@
 """Tests for the hardened agent loop."""
 from __future__ import annotations
 
-from pathlib import Path
-
 from self_healing.agent import heal
 
 
@@ -12,14 +10,14 @@ def test_empty_diff_is_skipped(tmp_path):
     test = 'assert False, "FAIL"\n'
     calls = {"n": 0}
 
-    def boom(_tb: str) -> str:
+    def flaky(_tb: str) -> str:
         calls["n"] += 1
         return "" if calls["n"] == 1 else (
             "--- a/add.py\n+++ b/add.py\n@@ -1,2 +1,2 @@\n"
             " def add(a, b):\n-    return a - b\n+    return a + b\n"
         )
 
-    report = heal(src, test, boom, max_attempts=3)
+    report = heal(src, test, flaky, max_attempts=3)
     assert report.success is True
     assert report.attempts == 2
     assert "return a + b" in report.final_source
