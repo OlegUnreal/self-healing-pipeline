@@ -4,7 +4,7 @@ from .agent import HealReport, heal, heal_with_tools
 from .config import Settings, load_settings
 from .graph import heal_with_graph, langgraph_available
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 __all__ = [
     "HealReport",
     "heal",
