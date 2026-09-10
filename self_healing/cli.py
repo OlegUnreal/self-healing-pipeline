@@ -8,6 +8,7 @@ from typing import Any, Callable, Sequence
 
 from .config import load_settings
 from .demo import stub_proposer
+from .workspace import resolve_workspace
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -19,7 +20,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--demo-llm", action="store_true", help="live LLM diff-loop demo")
     p.add_argument("--demo-tools", action="store_true", help="scripted tool-loop demo")
     p.add_argument("--demo-graph", action="store_true", help="scripted graph-loop demo")
-    p.add_argument("--src", type=Path, help="source file to repair")
+    p.add_argument(
+        "--src",
+        type=Path,
+        help="source file *or* directory (jail root) to repair",
+    )
     p.add_argument(
         "--test",
         help="path to a test file, or a Python snippet that must exit 0",
@@ -104,15 +109,16 @@ def run_workspace(args: argparse.Namespace) -> int:
     from .tools import Workspace
 
     settings = load_settings()
-    src: Path = args.src.expanduser().resolve()
-    if not src.is_file():
-        print(f"fatal: source not found: {src}", file=sys.stderr)
+    try:
+        source, root = resolve_workspace(args.src)
+    except FileNotFoundError as e:
+        print(f"fatal: {e}", file=sys.stderr)
         return 2
     test = _load_test(args.test)
     backend = _choose_backend(args.planner, settings)
     max_attempts = args.max_attempts or settings.max_attempts
     max_steps = args.max_steps or settings.max_tool_steps
-    ws = Workspace(src.parent, max_file_bytes=settings.max_file_bytes)
+    ws = Workspace(root, max_file_bytes=settings.max_file_bytes)
 
     on_event = None
     if args.stream:
@@ -127,7 +133,7 @@ def run_workspace(args: argparse.Namespace) -> int:
             proposer = make_openai_proposer(model=settings.model)
         else:
             proposer = stub_proposer
-        report = heal(src, test, proposer, max_attempts=max_attempts, cwd=src.parent)
+        report = heal(source, test, proposer, max_attempts=max_attempts, cwd=root)
         return _print_report(report)
 
     if backend == "openai":
@@ -135,17 +141,28 @@ def run_workspace(args: argparse.Namespace) -> int:
 
         planner = make_openai_planner(model=settings.model)
     else:
-        from .demo_tools import scripted_planner as planner
+        from .demo_tools import detect_scripted_fix, make_scripted_planner
 
-        if src.name != "add.py":
-            print("warning: stub planner only knows the add.py demo fixture", file=sys.stderr)
+        fix = detect_scripted_fix(root)
+        if fix is None:
+            print(
+                "fatal: stub planner has no fixture for this workspace "
+                "(known: examples/add.py, examples/pkg/). Use --planner openai.",
+                file=sys.stderr,
+            )
+            return 2
+        planner = make_scripted_planner(fix, test_code=test)
 
     if args.mode == "tools":
-        report = heal_with_tools(src, test, planner, max_steps=max_steps, workspace=ws)
+        report = heal_with_tools(source, test, planner, max_steps=max_steps, workspace=ws)
         return _print_report(report)
 
+    checkpointer = None
+    if args.use_langgraph:
+        checkpointer = make_checkpointer(args.checkpoint, required=bool(args.checkpoint))
+
     report = heal_with_graph(
-        src,
+        source,
         test,
         planner,
         max_steps=max_steps,
@@ -153,7 +170,7 @@ def run_workspace(args: argparse.Namespace) -> int:
         approve_mutations=args.approve_mutations,
         mutation_approver=_mutation_approver(args.yes) if args.approve_mutations else None,
         use_langgraph=args.use_langgraph,
-        checkpointer=make_checkpointer(args.checkpoint) if args.use_langgraph else None,
+        checkpointer=checkpointer,
         thread_id=args.thread_id,
         on_event=on_event,
     )
