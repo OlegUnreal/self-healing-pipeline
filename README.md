@@ -2,44 +2,28 @@
 
 An agent that runs a failing test, reads the traceback, and repairs the workspace until the suite is green.
 
-There are two repair modes:
+There are three repair modes:
 
 1. **Diff loop** — the model emits one unified diff per attempt.
-2. **Tool loop** — the model calls a sandboxed set of Python tools (`read_file`, `search_text`, `apply_patch`, `run_tests`, …) the same way Cursor / Claude Code do.
-
-This is the core repair loop behind those products, built from scratch in Python, with every hard part isolated and tested.
+2. **Tool loop** — the model calls a sandboxed set of Python tools (`read_file`, `search_text`, `apply_patch`, `run_tests`, …).
+3. **Graph loop** — the same tools, routed as Observe → Plan → Tools. LangGraph is an *optional* runtime for that graph, not a required dependency.
 
 ## Why this exists
 
-Most "AI coding agent" demos are a single LLM call wrapped in `while True`. The real difficulty is not the model — it is:
-
-- **Sandbox isolation** — running untrusted code without poisoning the host.
-- **Safe patch application** — applying a diff without path traversal or syntax corruption.
-- **A tool boundary** — the model proposes, tools execute, the jail decides.
-- **Failure classification** — telling the model *why* it failed, not just dumping a raw traceback.
-- **Loop termination** — avoiding infinite repair loops and burning the budget on empty diffs.
-
-This repo handles all five, with tests for each.
+Most "AI coding agent" demos are a single LLM call wrapped in `while True`. The real difficulty is not the model — it is sandbox isolation, safe patches, a tool boundary, failure classification, and loop termination. This repo handles all five, with tests for each.
 
 ## Architecture
 
 ```
 self_healing/
+├── cli.py              # python -m self_healing
 ├── agent.py            # diff loop + tool-calling loop
-├── tools/
-│   ├── base.py         # Workspace jail, Tool / ToolResult / ToolSpec
-│   ├── handlers.py     # the actual Python tools
-│   └── registry.py     # OpenAI function schemas + dispatch
-├── sandbox.py          # subprocess + RLIMIT_AS
-├── patcher.py          # unified diff, path-traversal rejection, py_compile
-├── verifier.py         # classify failure
-├── llm.py              # OpenAI proposer + planner
-├── config.py           # env / .env settings
-├── logging.py          # structured JSON logs
-├── demo.py / demo_llm.py / demo_tools.py
+├── graph.py            # Observe → Plan → Tools orchestrator
+├── tools/              # Workspace jail + handlers + registry
+├── sandbox.py / patcher.py / verifier.py
+├── llm.py / config.py / logging.py
+└── demo.py / demo_llm.py / demo_tools.py / demo_graph.py
 ```
-
-### Pipeline
 
 ```mermaid
 flowchart TD
@@ -47,54 +31,24 @@ flowchart TD
     B -->|PASS| Z[HealReport.success]
     B -->|FAIL + class| C{Repair mode}
     C -->|diff loop| D[LLM propose_diff]
-    D --> E[Patcher: validate / apply / py_compile]
+    D --> E[Patcher]
     E --> B
     C -->|tool loop| F[LLM planner]
     F --> G[ToolRegistry]
     G --> H[Workspace jail]
     H --> I[read / search / ast / patch / run_tests]
     I --> B
+    C -->|graph loop| J[observe / plan / tools / escalate]
+    J --> G
 ```
 
-Longer diagrams: [`docs/architecture.md`](docs/architecture.md). Tool catalogue: [`docs/tools.md`](docs/tools.md).
+Longer diagrams: [`docs/architecture.md`](docs/architecture.md). Tools: [`docs/tools.md`](docs/tools.md). LangGraph extra: [`docs/langgraph.md`](docs/langgraph.md).
 
 ![control loop](docs/architecture-animated.svg)
 
-## Python tools
+![demo](docs/demo.svg)
 
-```mermaid
-flowchart LR
-    LLM[Planner / LLM] -->|function call| REG[ToolRegistry]
-    REG --> JAIL[Workspace.resolve]
-    JAIL -->|ok| T[Handler]
-    JAIL -->|escape| ERR[ToolResult ok=false]
-    T --> FS[list / read / write / stat]
-    T --> AST[list_symbols / extract_function]
-    T --> SRCH[search_text]
-    T --> MUT[apply_patch / rollback]
-    T --> RUN[run_python / run_tests / compile_check]
-    T --> GIT[git_status / git_diff]
-```
-
-| Tool | Role |
-|---|---|
-| `workspace_info` | Jail root and backups |
-| `list_files` | Orient in the workspace |
-| `read_file` | Inspect with line numbers |
-| `write_file` | Full rewrite, previous bytes backed up |
-| `file_stat` | Existence / size |
-| `apply_patch` | Preferred mutation |
-| `rollback_file` | Undo last write/patch |
-| `compile_check` | `py_compile` without executing |
-| `run_python` | Sandboxed snippet |
-| `run_tests` | Ground truth that ends the loop |
-| `search_text` | Regex search |
-| `list_symbols` | Top-level functions and classes via `ast` |
-| `extract_function` | Surgical extract of one `FunctionDef` |
-| `classify_failure` | `syntax` / `assertion` / `import` / … |
-| `git_status` / `git_diff` | Optional VCS context |
-
-Unknown tool names return an error result instead of raising.
+Transcript: [`docs/demo-transcript.md`](docs/demo-transcript.md).
 
 ## How to run
 
@@ -104,47 +58,67 @@ cd self-healing-pipeline
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-python -m self_healing --demo         # stub proposer, no key
-python -m self_healing --demo-tools   # scripted tool loop, no key
-cp .env.example .env                  # OPENAI_API_KEY=...
+python -m self_healing --demo
+python -m self_healing --demo-tools
+python -m self_healing --demo-graph
+
+python -m self_healing \
+  --src examples/add.py \
+  --test examples/test_add.py \
+  --mode graph --planner stub --stream
+
+cp .env.example .env
 python -m self_healing --demo-llm
 pytest -q
 ```
+
+Optional LangGraph runtime:
+
+```bash
+pip install -r requirements-langgraph.txt
+python -m self_healing --src examples/add.py --test examples/test_add.py \
+  --mode graph --use-langgraph --checkpoint /tmp/heal.sqlite
+```
+
+`--approve-mutations` pauses before `write_file` / `apply_patch`. Combine with `--yes` to auto-approve.
 
 ## Libraries used and why
 
 | Library | Why | How integrated |
 |---|---|---|
-| `openai>=1.40` | Official SDK for chat completions and native tool/function calling. | `llm.py` talks only to `client.chat.completions.create`. `make_openai_proposer` returns diffs; `make_openai_planner` returns `{content, tool_calls}` that `heal_with_tools` dispatches. |
-| `pytest>=8.0` | Test runner and the *subject* of the pipeline. | Unit tests inject a fake LLM client so CI never needs a key. |
-| `python-dotenv>=1.0` | Load `.env` so secrets stay out of source. Optional import. | `config.load_settings()` reads `OPENAI_API_KEY` and `SHP_*`. |
+| `openai>=1.40` | Official SDK for chat + tool calling. | `llm.py` — proposer and planner. |
+| `pytest>=8.0` | Test runner and the *subject* of the pipeline. | CI never needs an API key. |
+| `python-dotenv>=1.0` | Secrets stay out of source. | `config.load_settings()`. |
 | stdlib `ast` | Surgical function extract. | `list_symbols` / `extract_function`. |
-| stdlib `subprocess` + `resource` | Process isolation and `RLIMIT_AS`. | `sandbox.run_code`, `patcher.apply_diff`. |
-| system `patch` | Same tool humans use in review. | `patch -p0 --forward --batch` after path validation. |
+| stdlib `subprocess` + `resource` | Process isolation + `RLIMIT_AS`. | `sandbox.run_code`. |
+| system `patch` | Same tool humans use in review. | `patcher.apply_diff`. |
+| `langgraph` (optional extra) | Checkpoints, streaming, HITL. | `graph.build_heal_graph()` only with `--use-langgraph`. |
 
-No LangGraph / vector store / web framework on purpose — this repo is the control loop, not a product wrapper.
+No vector store and no web framework. LangGraph is opt-in so the core stay small.
 
 ## Configuration
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `OPENAI_API_KEY` | — | required for `--demo-llm` |
-| `SHP_MODEL` | `gpt-4o-mini` | proposer / planner model |
+| `OPENAI_API_KEY` | — | live LLM modes |
+| `SHP_MODEL` | `gpt-4o-mini` | proposer / planner |
 | `SHP_MAX_ATTEMPTS` | `5` | diff-loop budget |
-| `SHP_MAX_TOOL_STEPS` | `12` | tool-loop budget |
+| `SHP_MAX_TOOL_STEPS` | `12` | tool/graph budget |
 | `SHP_TIMEOUT` | `30` | per-LLM-call timeout |
 | `SHP_SANDBOX_TIMEOUT` | `5` | per-sandbox-run timeout |
 | `SHP_SANDBOX_MEMORY_MB` | `256` | `RLIMIT_AS` cap |
 | `SHP_MAX_FILE_BYTES` | `200000` | jail read/write cap |
+| `SHP_USE_LANGGRAPH` | `false` | prefer LangGraph when installed |
 
 ## Design decisions
 
-1. Subprocess sandbox instead of `exec()` — a bad patch must not run in-process.
-2. Tools instead of one-shot diffs — real repairs need inspect → mutate → verify.
-3. `patch -p0` instead of string surgery — fails loudly on context mismatch.
-4. Failure classes instead of raw tracebacks — less token waste, clearer prompts.
-5. Retries in the proposer, not the loop — network blips must not burn attempt budget.
-6. Workspace jail in front of every tool — `../.ssh/id_rsa` becomes `ToolResult.error`.
+1. Subprocess sandbox instead of `exec()`.
+2. Tools instead of one-shot diffs.
+3. `patch -p0` instead of string surgery.
+4. Failure classes instead of raw tracebacks.
+5. Retries in the proposer, not the loop.
+6. Workspace jail in front of every tool.
+7. Graph as an orchestrator, not `create_react_agent`.
 
 ## License
 
