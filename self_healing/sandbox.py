@@ -1,13 +1,12 @@
 """Sandbox executor: runs untrusted Python in an isolated subprocess."""
 from __future__ import annotations
 
-import logging
 import os
-import signal
 import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass
+from pathlib import Path
 
 from . import logging as logmod
 
@@ -24,10 +23,12 @@ class RunResult:
 
 
 def _preexec_limits(memory_mb: int) -> None:
-    """Drop privileges and cap memory inside the child. Runs in preexec_fn."""
+    """Cap memory inside the child. Runs in preexec_fn."""
     try:
         import resource
-        resource.setrlimit(resource.RLIMIT_AS, (memory_mb * 1024 * 1024, memory_mb * 1024 * 1024))
+
+        cap = memory_mb * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
     except (ValueError, OSError, ImportError):
         pass
     try:
@@ -36,25 +37,26 @@ def _preexec_limits(memory_mb: int) -> None:
         pass
 
 
-def run_code(code: str, timeout: float = 5.0, memory_mb: int = 256) -> RunResult:
-    """Execute `code` in a fresh interpreter. No network, no filesystem writes outside /tmp.
+def run_code(
+    code: str,
+    timeout: float = 5.0,
+    memory_mb: int = 256,
+    cwd: str | Path | None = None,
+) -> RunResult:
+    """Execute `code` in a fresh interpreter.
 
-    Memory limits are applied via RLIMIT_AS inside a preexec_fn so a limit
-    breach kills only the child (returns exit -9) and never the host test
-    process. Timeouts are caught and returned as RunResult(timed_out=True).
-
-    The wrapper uses textwrap.dedent(code).lstrip("\n") instead of
-    textwrap.dedent(f"\n{code}\n"): the latter shifts every line by one
-    level when the first line has no indent, producing IndentationError on
-    multi-line snippets like `from add import add\nassert ...`.
+    `cwd` is the working directory of the child so tests can `import` modules
+    that live next to the file being repaired.
     """
     wrapped = textwrap.dedent(code).lstrip("\n")
+    workdir = str(cwd) if cwd is not None else None
     try:
         proc = subprocess.run(
             [sys.executable, "-c", wrapped],
             capture_output=True,
             text=True,
             timeout=timeout,
+            cwd=workdir,
             preexec_fn=lambda: _preexec_limits(memory_mb),
             start_new_session=True,
         )

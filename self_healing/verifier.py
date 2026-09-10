@@ -1,10 +1,12 @@
 """Verifier: re-runs the test and classifies the failure mode."""
 from __future__ import annotations
 
+from pathlib import Path
+
 from .sandbox import RunResult, run_code
 
 
-def _classify(result: RunResult) -> str:
+def classify_output(result: RunResult) -> str:
     """Return a coarse failure class for logging / LLM context."""
     if result.timed_out:
         return "timeout"
@@ -18,18 +20,27 @@ def _classify(result: RunResult) -> str:
         return "assertion_failure"
     if "importerror" in low or "modulenotfounderror" in low:
         return "import_error"
+    if "nameerror" in low:
+        return "name_error"
+    if "typeerror" in low:
+        return "type_error"
     if result.exit_code != 0:
         return "runtime_error"
-    return "unknown"
+    return "ok"
 
 
-def verify(test_code: str, timeout: float = 5.0) -> RunResult:
-    """Run `test_code`; success == exit code 0 and no 'FAIL' anywhere.
+def _classify(result: RunResult) -> str:
+    return classify_output(result)
 
-    The returned RunResult.stderr is prefixed with a `[class=...]` tag so the
-    LLM proposer sees *why* it failed, not just the raw traceback.
-    """
-    result = run_code(test_code, timeout=timeout)
+
+def verify(
+    test_code: str,
+    timeout: float = 5.0,
+    cwd: str | Path | None = None,
+    memory_mb: int = 256,
+) -> RunResult:
+    """Run `test_code`; success == exit code 0 and no 'FAIL' anywhere."""
+    result = run_code(test_code, timeout=timeout, cwd=cwd, memory_mb=memory_mb)
     combined = (result.stdout or "") + (result.stderr or "")
     passed = result.exit_code == 0 and "FAIL" not in combined
     if passed:
