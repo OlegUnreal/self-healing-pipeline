@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 360" width="720" height="360" role="img" aria-label="self-healing-pipeline demo">
+  <rect width="720" height="360" rx="12" fill="#111827"/>
+  <rect x="12" y="12" width="696" height="336" rx="8" fill="#0b1220" stroke="#1f2937"/>
+  <circle cx="36" cy="36" r="6" fill="#ef4444"/>
+  <circle cx="56" cy="36" r="6" fill="#f59e0b"/>
+  <circle cx="76" cy="36" r="6" fill="#22c55e"/>
+  <text x="100" y="40" fill="#9ca3af" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">python -m self_healing --demo-graph</text>
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14" fill="#e5e7eb">
+    <text x="28" y="80" fill="#6ee7b7">$</text>
+    <text x="48" y="80">observe  assertion_failure</text>
+    <text x="28" y="108" fill="#93c5fd">→</text>
+    <text x="48" y="108">plan     run_tests</text>
+    <text x="28" y="136" fill="#93c5fd">→</text>
+    <text x="48" y="136">plan     read_file / list_symbols</text>
+    <text x="28" y="164" fill="#93c5fd">→</text>
+    <text x="48" y="164">tools    apply_patch add.py</text>
+    <text x="28" y="192" fill="#6ee7b7">✓</text>
+    <text x="48" y="192">observe  tests green</text>
+    <text x="28" y="236" fill="#34d399">success: True</text>
+    <text x="28" y="264" fill="#9ca3af">return a - b   →   return a + b</text>
+  </g>
+</svg>
