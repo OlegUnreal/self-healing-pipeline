@@ -26,3 +26,19 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Run tests
         run: pytest -q
+
+  test-langgraph-extra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install core + optional extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+          pip install -r requirements-langgraph.txt
+      - name: Run tests including graph adapter
+        run: pytest -q
