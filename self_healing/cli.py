@@ -157,10 +157,7 @@ def run_workspace(args: argparse.Namespace) -> int:
         report = heal_with_tools(source, test, planner, max_steps=max_steps, workspace=ws)
         return _print_report(report)
 
-    checkpointer = None
-    if args.use_langgraph:
-        checkpointer = make_checkpointer(args.checkpoint, required=bool(args.checkpoint))
-
+    checkpointer = make_checkpointer(args.checkpoint) if args.use_langgraph else None
     report = heal_with_graph(
         source,
         test,
