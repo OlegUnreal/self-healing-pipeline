@@ -29,6 +29,13 @@ def _float(name: str, default: float) -> float:
     return float(raw)
 
 
+def _bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Settings:
     openai_api_key: str = ""
@@ -39,6 +46,7 @@ class Settings:
     sandbox_memory_mb: int = 256
     max_tool_steps: int = 12
     max_file_bytes: int = 200_000
+    use_langgraph: bool = False
 
 
 def load_settings() -> Settings:
@@ -52,4 +60,5 @@ def load_settings() -> Settings:
         sandbox_memory_mb=_int("SHP_SANDBOX_MEMORY_MB", 256),
         max_tool_steps=_int("SHP_MAX_TOOL_STEPS", 12),
         max_file_bytes=_int("SHP_MAX_FILE_BYTES", 200_000),
+        use_langgraph=_bool("SHP_USE_LANGGRAPH", False),
     )
