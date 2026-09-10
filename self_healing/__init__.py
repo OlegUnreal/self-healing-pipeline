@@ -1,3 +1,7 @@
-"""Self-healing code pipeline."""
+"""Self-healing code pipeline with a sandboxed Python tool layer."""
 
-__version__ = "0.1.0"
+from .agent import HealReport, heal, heal_with_tools
+from .config import Settings, load_settings
+
+__version__ = "0.2.0"
+__all__ = ["HealReport", "heal", "heal_with_tools", "Settings", "load_settings"]
