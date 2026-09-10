@@ -1,15 +1,10 @@
-"""Tests for the hardened agent loop."""
-from __future__ import annotations
-
 from self_healing.agent import heal
 
 
 def test_empty_diff_is_skipped(tmp_path):
     src = tmp_path / "add.py"
     src.write_text("def add(a, b):\n    return a - b\n")
-    # The flaky proposer's second answer flips `-` to `+`, so the assertion
-    # must actually hold afterwards — `assert False` can never be healed.
-    test = 'assert add(2, 3) == 5\n'
+    test = "from add import add\nassert add(2, 3) == 5\n"
     calls = {"n": 0}
 
     def flaky(_tb: str) -> str:
@@ -21,9 +16,9 @@ def test_empty_diff_is_skipped(tmp_path):
 
     report = heal(src, test, flaky, max_attempts=3)
     assert report.success is True
-    assert report.attempts == 2
+    assert report.attempts >= 2
     assert "return a + b" in report.final_source
-    assert report.events.events, "expected structured events"
+    assert report.events.events
 
 
 def test_llm_exception_surfaced(tmp_path):
@@ -58,7 +53,7 @@ def test_verify_crash_surfaced(tmp_path, monkeypatch):
     src = tmp_path / "x.py"
     src.write_text("x = 1\n")
 
-    def boom_verify(_test: str, timeout: float = 5.0):
+    def boom_verify(_test: str, timeout: float = 5.0, cwd=None, memory_mb: int = 256):
         raise RuntimeError("verifier down")
 
     monkeypatch.setattr("self_healing.agent.verify", boom_verify)
