@@ -1,0 +1,4 @@
+# Optional extra. The core loop does not need these.
+# pip install -r requirements-langgraph.txt
+langgraph>=0.2
+langchain-core>=0.3

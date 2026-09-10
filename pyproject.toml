@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "self-healing-pipeline"
+version = "0.3.0"
+description = "Sandboxed self-healing coding agent with diff, tool and graph loops."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = [
+  "openai>=1.40",
+  "pytest>=8.0",
+  "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+langgraph = [
+  "langgraph>=0.2",
+  "langchain-core>=0.3",
+]
+dev = [
+  "pytest-cov>=5.0",
+]
+
+[project.scripts]
+self-healing = "self_healing.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["self_healing*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
