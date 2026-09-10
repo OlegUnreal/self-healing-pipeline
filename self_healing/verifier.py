@@ -16,12 +16,12 @@ def classify_output(result: RunResult) -> str:
         return "syntax_error"
     if "indentationerror" in low:
         return "indentation_error"
-    if "assertionerror" in low or "fail" in low:
-        return "assertion_failure"
     if "importerror" in low or "modulenotfounderror" in low:
         return "import_error"
     if "nameerror" in low:
         return "name_error"
+    if "assertionerror" in low or "\nfail" in low or low.startswith("fail"):
+        return "assertion_failure"
     if "typeerror" in low:
         return "type_error"
     if result.exit_code != 0:
