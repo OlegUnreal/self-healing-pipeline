@@ -1,5 +1,9 @@
 # self-healing-pipeline
 
+[![CI](https://github.com/OlegUnreal/self-healing-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/OlegUnreal/self-healing-pipeline/actions/workflows/ci.yml)
+
+The model proposes. The jail executes. Tests decide.
+
 An agent that runs a failing test, reads the traceback, and repairs the workspace until the suite is green.
 
 There are three repair modes:
@@ -42,7 +46,7 @@ flowchart TD
     J --> G
 ```
 
-Longer diagrams: [`docs/architecture.md`](docs/architecture.md). Tools: [`docs/tools.md`](docs/tools.md). LangGraph extra: [`docs/langgraph.md`](docs/langgraph.md).
+Longer diagrams: [`docs/architecture.md`](docs/architecture.md). Tools: [`docs/tools.md`](docs/tools.md). LangGraph extra: [`docs/langgraph.md`](docs/langgraph.md). Changelog: [`CHANGELOG.md`](CHANGELOG.md).
 
 ![control loop](docs/architecture-animated.svg)
 
@@ -108,7 +112,7 @@ No vector store and no web framework. LangGraph is opt-in so the core stay small
 | `SHP_SANDBOX_TIMEOUT` | `5` | per-sandbox-run timeout |
 | `SHP_SANDBOX_MEMORY_MB` | `256` | `RLIMIT_AS` cap |
 | `SHP_MAX_FILE_BYTES` | `200000` | jail read/write cap |
-| `SHP_USE_LANGGRAPH` | `false` | prefer LangGraph when installed |
+| `SHP_USE_LANGGRAPH` | `false` | prefer LangGraph when the extra is installed |
 
 ## Design decisions
 
@@ -122,4 +126,4 @@ No vector store and no web framework. LangGraph is opt-in so the core stay small
 
 ## License
 
-MIT.
+MIT. See [`LICENSE`](LICENSE).
