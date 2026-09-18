@@ -1,0 +1,7 @@
+# Optional extra: retrieval memory + trained failure classifier.
+# The core repair loop, sandbox and tools run without any of this.
+# pip install -r requirements-ml.txt   (or: pip install -e ".[ml]")
+numpy>=1.26
+scipy>=1.11
+scikit-learn>=1.4
+joblib>=1.3
