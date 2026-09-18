@@ -353,6 +353,27 @@ def build_classifier(
     return classifier
 
 
+def open_classifier(settings) -> TracebackClassifier | None:
+    """Load the artifact named by Settings, and never train while answering.
+
+    `build_classifier` auto-trains, which is right for an eval script and wrong for
+    the repair loop: fitting costs seconds, and an unattended `shp heal` would write
+    a model into the user's repo. Here a missing artifact is a normal state, not an
+    error -- it just means the keyword rules keep the seat.
+    """
+    if not getattr(settings, "use_ml", False):
+        return None
+    path = Path(getattr(settings, "ml_model_path", ""))
+    if not str(path) or not path.exists():
+        log.warning("classifier artifact missing, using rules", extra={"path": str(path)})
+        return None
+    try:
+        return TracebackClassifier.load(path)
+    except Exception as exc:
+        log.warning("classifier artifact unreadable, using rules", extra={"error": str(exc)})
+        return None
+
+
 def model_card(classifier: TracebackClassifier) -> str:
     """Human-readable provenance, the thing reviewers open first."""
     m = classifier.metrics or {}

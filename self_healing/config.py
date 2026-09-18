@@ -47,6 +47,10 @@ class Settings:
     max_tool_steps: int = 12
     max_file_bytes: int = 200_000
     use_langgraph: bool = False
+    use_ml: bool = False
+    ml_model_path: str = "models/failure_classifier.joblib"
+    memory_path: str = ".shp/repair-memory.sqlite3"
+    memory_top_k: int = 3
 
 
 def load_settings() -> Settings:
@@ -61,4 +65,8 @@ def load_settings() -> Settings:
         max_tool_steps=_int("SHP_MAX_TOOL_STEPS", 12),
         max_file_bytes=_int("SHP_MAX_FILE_BYTES", 200_000),
         use_langgraph=_bool("SHP_USE_LANGGRAPH", False),
+        use_ml=_bool("SHP_USE_ML", False),
+        ml_model_path=os.environ.get("SHP_ML_MODEL_PATH", "models/failure_classifier.joblib"),
+        memory_path=os.environ.get("SHP_MEMORY_PATH", ".shp/repair-memory.sqlite3"),
+        memory_top_k=_int("SHP_MEMORY_TOP_K", 3),
     )

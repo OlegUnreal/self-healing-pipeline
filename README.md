@@ -86,6 +86,22 @@ python -m self_healing --src examples/add.py --test examples/test_add.py \
 
 `--approve-mutations` pauses before `write_file` / `apply_patch`. Combine with `--yes` to auto-approve.
 
+Optional ML stack — semantic repair memory + a trained failure classifier (`pip install -e ".[ml]"`, details in [`docs/ml-stack.md`](docs/ml-stack.md)):
+
+```bash
+python -m self_healing --train-classifier      # train once, cache the artifact
+python -m self_healing --src examples/add.py --test examples/test_add.py \
+  --mode tools --ml --yes                      # recall past repairs, learned classes
+```
+
+With `--ml` every repair is remembered: the diff loop stores one row per
+attempt, the tool/graph loops store the net workspace diff per episode.
+On the next red run the top-k similar past repairs are injected into the
+planner prompt as hints. The classifier tags failures where the keyword
+ladder is weakest (chained tracebacks: model macro-F1 0.7315 vs rules
+0.5022) and defers to the rules whenever it has no standing
+([model card](docs/model-card.md)).
+
 ## Libraries used and why
 
 | Library | Why | How integrated |
@@ -97,8 +113,7 @@ python -m self_healing --src examples/add.py --test examples/test_add.py \
 | stdlib `subprocess` + `resource` | Process isolation + `RLIMIT_AS`. | `sandbox.run_code`. |
 | system `patch` | Same tool humans use in review. | `patcher.apply_diff`. |
 | `langgraph` (optional extra) | Checkpoints, streaming, HITL. | `graph.build_heal_graph()` only with `--use-langgraph`. |
-
-No vector store and no web framework. LangGraph is opt-in so the core stay small.
+| `numpy` + `scikit-learn` (optional extra) | Repair-memory embeddings, the failure classifier. | `memory.py` / `classifier.py`, only with `--ml`. |
 
 ## Configuration
 
@@ -113,6 +128,10 @@ No vector store and no web framework. LangGraph is opt-in so the core stay small
 | `SHP_SANDBOX_MEMORY_MB` | `256` | `RLIMIT_AS` cap |
 | `SHP_MAX_FILE_BYTES` | `200000` | jail read/write cap |
 | `SHP_USE_LANGGRAPH` | `false` | prefer LangGraph when the extra is installed |
+| `SHP_USE_ML` | `false` | repair memory + failure classifier (same as `--ml`) |
+| `SHP_ML_MODEL_PATH` | `models/failure_classifier.joblib` | classifier artifact |
+| `SHP_MEMORY_PATH` | `.shp/repair-memory.sqlite3` | repair-memory store |
+| `SHP_MEMORY_TOP_K` | `3` | recalled hints per episode |
 
 ## Design decisions
 
@@ -123,6 +142,7 @@ No vector store and no web framework. LangGraph is opt-in so the core stay small
 5. Retries in the proposer, not the loop.
 6. Workspace jail in front of every tool.
 7. Graph as an orchestrator, not `create_react_agent`.
+8. Memory observes, it does not steer: learning hooks are gated on an attached store and can never flip a verdict.
 
 ## License
 

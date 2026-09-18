@@ -21,6 +21,8 @@ class Workspace:
     root: Path
     max_file_bytes: int = 200_000
     backups: dict[str, str] = field(default_factory=dict)
+    memory: Any = None
+    classifier: Any = None
 
     def __post_init__(self) -> None:
         self.root = Path(self.root).resolve()
@@ -48,6 +50,32 @@ class Workspace:
             return None
         path.write_text(self.backups[key], encoding="utf-8")
         return self.backups[key]
+
+    def net_diff(self) -> str:
+        """One unified diff for the whole episode, rebuilt from the pre-run backups.
+
+        A tool-loop repair reaches its result through ten separate calls, so the unit
+        worth remembering is the net effect on the workspace. Files created mid-run
+        have no backup and are therefore absent here; the edits that fix real code are
+        the ones that carry information about which line was wrong.
+        """
+        import difflib
+
+        chunks: list[str] = []
+        for key, before in self.backups.items():
+            path = self.root / key
+            after = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+            if after == before:
+                continue
+            chunks.extend(
+                difflib.unified_diff(
+                    before.splitlines(keepends=True),
+                    after.splitlines(keepends=True),
+                    fromfile=f"a/{key}",
+                    tofile=f"b/{key}",
+                )
+            )
+        return "".join(chunks)
 
 
 @dataclass

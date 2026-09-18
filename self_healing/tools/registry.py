@@ -41,6 +41,7 @@ _TOOLS: list[Tool] = [
     Tool(ToolSpec("list_symbols", "Parse a Python file with ast and list top-level functions and classes.", _obj({"path": _str("Python file.")}, ["path"])), handlers.list_symbols),
     Tool(ToolSpec("extract_function", "Surgically extract one function by name using ast.get_source_segment.", _obj({"path": _str("Python file."), "name": _str("Function name.")}, ["path", "name"])), handlers.extract_function),
     Tool(ToolSpec("classify_failure", "Map a traceback or test output to a coarse class (syntax, assertion, import, ...).", _obj({"output": _str("Traceback or test output.")}, ["output"])), handlers.classify_failure),
+    Tool(ToolSpec("recall_repairs", "Retrieve past repairs of similar tracebacks, ranked by similarity blended with how often that fix actually went green. Empty store returns an error.", _obj({"query": _str("Traceback or failure description to match against."), "k": _int("How many repairs to return (1-5).")}, ["query"])), handlers.recall_repairs),
     Tool(ToolSpec("git_status", "Return git status --porcelain if the workspace is a git repo.", _obj({})), handlers.git_status),
     Tool(ToolSpec("git_diff", "Return git diff for the workspace or a single path.", _obj({"path": _str("Optional path filter.")})), handlers.git_diff),
 ]

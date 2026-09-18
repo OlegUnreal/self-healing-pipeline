@@ -261,7 +261,48 @@ def classify_failure(ws: Workspace, output: str) -> ToolResult:
     from ..sandbox import RunResult
 
     dummy = RunResult(stdout=output, stderr="", exit_code=1, timed_out="timeout" in output.lower())
-    return ToolResult(ok=True, data={"class": classify_output(dummy), "workspace": str(ws.root)})
+    classifier = getattr(ws, "classifier", None)
+    if classifier is not None:
+        from ..verifier import classify_with_ml
+
+        learned = classify_with_ml(dummy, classifier)
+        if learned:
+            return ToolResult(ok=True, data={"class": learned, "backend": "learned", "workspace": str(ws.root)})
+    return ToolResult(ok=True, data={"class": classify_output(dummy), "backend": "rules", "workspace": str(ws.root)})
+
+
+def recall_repairs(ws: Workspace, query: str, k: int = 3) -> ToolResult:
+    """Ask the episodic store what fixed a similar traceback before.
+
+    The scores are exposed rather than just the diffs: a planner that can see
+    `similarity` next to `prior` is in a better position to distrust a near-random
+    hit than one handed three unlabelled patches.
+    """
+    memory = getattr(ws, "memory", None)
+    if memory is None:
+        return ToolResult(ok=False, error="repair memory disabled (SHP_USE_ML=1, SHP_MEMORY_PATH=...)")
+    try:
+        hits = memory.recall(query, max(1, int(k)))
+    except Exception as e:  # noqa: BLE001 - a broken index is not a repair blocker
+        return ToolResult(ok=False, error=f"recall failed: {type(e).__name__}: {e}")
+    return ToolResult(
+        ok=True,
+        data={
+            "count": len(hits),
+            "repairs": [
+                {
+                    "class": h.record.failure_class,
+                    "similarity": round(h.similarity, 4),
+                    "prior": round(h.prior, 4),
+                    "score": round(h.score, 4),
+                    "green": h.record.success,
+                    "attempts": h.record.attempts,
+                    "diff": h.record.diff[:4000],
+                }
+                for h in hits
+            ],
+        },
+    )
 
 
 def git_status(ws: Workspace) -> ToolResult:

@@ -53,6 +53,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--yes", action="store_true", help="auto-approve mutations")
     p.add_argument("--use-langgraph", action="store_true", help="force LangGraph runtime if installed")
+    p.add_argument(
+        "--ml",
+        action="store_true",
+        help="attach repair memory + the trained failure classifier (SHP_USE_ML=1 has the same effect)",
+    )
+    p.add_argument(
+        "--train-classifier",
+        action="store_true",
+        help="train the failure classifier on the shipped corpus and save the artifact",
+    )
+    p.add_argument("--model-path", type=Path, help="failure-classifier artifact path (default: SHP_ML_MODEL_PATH)")
     p.add_argument("-v", "--verbose", action="store_true")
     return p
 
@@ -88,7 +99,7 @@ def _mutation_approver(yes: bool) -> Callable[[dict[str, Any]], bool]:
     return approve
 
 
-def _print_report(report) -> int:
+def _print_report(report, memory=None) -> int:
     for a in report:
         extra = f" tools={a.tools}" if a.tools else ""
         err = f" err={a.error}" if a.error else ""
@@ -98,17 +109,55 @@ def _print_report(report) -> int:
     print("success:", report.success)
     if report.final_source:
         print("final source:\n", report.final_source)
+    if memory is not None:
+        try:
+            print("memory:", memory.stats())
+        except Exception as e:  # noqa: BLE001
+            print(f"memory stats unavailable: {e}", file=sys.stderr)
     if report.error and not report.success:
         print("error:", report.error, file=sys.stderr)
     return 0 if report.success else 2
 
 
+def train_classifier(args: argparse.Namespace) -> int:
+    from .classifier import build_classifier, model_card
+
+    settings = load_settings()
+    path = args.model_path or Path(settings.ml_model_path)
+    print(f"training the failure classifier -> {path}")
+    classifier = build_classifier(model_path=path)
+    report = classifier.metrics or {}
+    for key in (
+        "macro_f1",
+        "rule_baseline_macro_f1",
+        "chained_model_macro_f1",
+        "chained_rule_macro_f1",
+        "single_exception_model_macro_f1",
+        "bag_only_macro_f1",
+        "ece",
+        "train_size",
+        "test_size",
+        "backend",
+        "features",
+    ):
+        print(f"{key}: {report.get(key)}")
+    print()
+    print(model_card(classifier))
+    return 0
+
+
 def run_workspace(args: argparse.Namespace) -> int:
+    from dataclasses import replace
+
     from .agent import heal, heal_with_tools
+    from .classifier import open_classifier
     from .graph import heal_with_graph, make_checkpointer
+    from .memory import open_memory
     from .tools import Workspace
 
     settings = load_settings()
+    if args.ml:
+        settings = replace(settings, use_ml=True, ml_model_path=str(args.model_path or settings.ml_model_path))
     try:
         source, root = resolve_workspace(args.src)
     except FileNotFoundError as e:
@@ -120,58 +169,79 @@ def run_workspace(args: argparse.Namespace) -> int:
     max_steps = args.max_steps or settings.max_tool_steps
     ws = Workspace(root, max_file_bytes=settings.max_file_bytes)
 
+    memory = open_memory(settings)
+    classifier = open_classifier(settings)
+    if args.ml:
+        if memory is None:
+            print("note: repair memory unavailable (pip install -e '.[ml]')", file=sys.stderr)
+        if classifier is None:
+            print("note: no classifier artifact, keyword rules in charge (see --train-classifier)", file=sys.stderr)
+
     on_event = None
     if args.stream:
         def on_event(node: str, state: dict[str, Any]) -> None:  # noqa: F811
             flag = "PASS" if state.get("passed") else state.get("failure_class") or "..."
             print(f"[{node}] steps={state.get('steps', 0)} {flag}")
 
-    if args.mode == "diff":
-        if backend == "openai":
-            from .llm import make_openai_proposer
+    try:
+        if args.mode == "diff":
+            if backend == "openai":
+                from .llm import make_openai_proposer
 
-            proposer = make_openai_proposer(model=settings.model)
-        else:
-            proposer = stub_proposer
-        report = heal(source, test, proposer, max_attempts=max_attempts, cwd=root)
-        return _print_report(report)
-
-    if backend == "openai":
-        from .llm import make_openai_planner
-
-        planner = make_openai_planner(model=settings.model)
-    else:
-        from .demo_tools import detect_scripted_fix, make_scripted_planner
-
-        fix = detect_scripted_fix(root)
-        if fix is None:
-            print(
-                "fatal: stub planner has no fixture for this workspace "
-                "(known: examples/add.py, examples/pkg/). Use --planner openai.",
-                file=sys.stderr,
+                proposer = make_openai_proposer(model=settings.model)
+            else:
+                proposer = stub_proposer
+            report = heal(
+                source, test, proposer, max_attempts=max_attempts, cwd=root,
+                memory=memory, classifier=classifier, memory_top_k=settings.memory_top_k,
             )
-            return 2
-        planner = make_scripted_planner(fix, test_code=test)
+            return _print_report(report, memory=memory)
 
-    if args.mode == "tools":
-        report = heal_with_tools(source, test, planner, max_steps=max_steps, workspace=ws)
-        return _print_report(report)
+        if backend == "openai":
+            from .llm import make_openai_planner
 
-    checkpointer = make_checkpointer(args.checkpoint) if args.use_langgraph else None
-    report = heal_with_graph(
-        source,
-        test,
-        planner,
-        max_steps=max_steps,
-        workspace=ws,
-        approve_mutations=args.approve_mutations,
-        mutation_approver=_mutation_approver(args.yes) if args.approve_mutations else None,
-        use_langgraph=args.use_langgraph,
-        checkpointer=checkpointer,
-        thread_id=args.thread_id,
-        on_event=on_event,
-    )
-    return _print_report(report)
+            planner = make_openai_planner(model=settings.model)
+        else:
+            from .demo_tools import detect_scripted_fix, make_scripted_planner
+
+            fix = detect_scripted_fix(root)
+            if fix is None:
+                print(
+                    "fatal: stub planner has no fixture for this workspace "
+                    "(known: examples/add.py, examples/pkg/). Use --planner openai.",
+                    file=sys.stderr,
+                )
+                return 2
+            planner = make_scripted_planner(fix, test_code=test)
+
+        if args.mode == "tools":
+            report = heal_with_tools(
+                source, test, planner, max_steps=max_steps, workspace=ws,
+                memory=memory, classifier=classifier, memory_top_k=settings.memory_top_k,
+            )
+            return _print_report(report, memory=memory)
+
+        checkpointer = make_checkpointer(args.checkpoint) if args.use_langgraph else None
+        report = heal_with_graph(
+            source,
+            test,
+            planner,
+            max_steps=max_steps,
+            workspace=ws,
+            approve_mutations=args.approve_mutations,
+            mutation_approver=_mutation_approver(args.yes) if args.approve_mutations else None,
+            use_langgraph=args.use_langgraph,
+            checkpointer=checkpointer,
+            thread_id=args.thread_id,
+            on_event=on_event,
+            memory=memory,
+            classifier=classifier,
+            memory_top_k=settings.memory_top_k,
+        )
+        return _print_report(report, memory=memory)
+    finally:
+        if memory is not None:
+            memory.close()
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -189,6 +259,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     try:
+        if args.train_classifier:
+            return train_classifier(args)
         if args.demo_llm:
             from .demo_llm import main as run
             run()

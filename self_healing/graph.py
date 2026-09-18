@@ -17,8 +17,9 @@ from typing import Any, Callable, Iterator, Literal
 
 from .agent import Attempt, HealReport, Planner
 from . import logging as logmod
+from .memory import observe
 from .tools import ToolRegistry, Workspace, default_registry
-from .verifier import verify
+from .verifier import classify_output, verify
 
 log = logmod.get_logger(__name__)
 
@@ -47,6 +48,9 @@ class GraphContext:
     approve_mutations: bool = False
     mutation_approver: MutationApprover | None = None
     logger: Any = None
+    memory: Any = None
+    classifier: Any = None
+    memory_top_k: int = 3
 
 
 def initial_state(source: Path, test: str, max_steps: int) -> dict[str, Any]:
@@ -71,6 +75,8 @@ def initial_state(source: Path, test: str, max_steps: int) -> dict[str, Any]:
         "source_name": source.name,
         "test_code": test,
         "failure_class": "",
+        "episode_traceback": "",
+        "episode_class": "",
         "last_output": "",
         "steps": 0,
         "max_steps": max_steps,
@@ -84,15 +90,27 @@ def initial_state(source: Path, test: str, max_steps: int) -> dict[str, Any]:
 
 
 def observe_node(ctx: GraphContext, state: dict[str, Any]) -> dict[str, Any]:
-    result = verify(state["test_code"], cwd=ctx.workspace.root)
+    lg = ctx.logger or log
+    result = verify(state["test_code"], cwd=ctx.workspace.root, classifier=ctx.classifier)
     output = result.stderr or result.stdout
     passed = result.exit_code == 0
-    kind = result.error or ("ok" if passed else "runtime_error")
-    return {
+    kind = result.error or ("ok" if passed else classify_output(result))
+    update: dict[str, Any] = {
         "passed": passed,
         "last_output": output,
         "failure_class": kind,
     }
+    if passed or state.get("episode_traceback") or ctx.memory is None or ctx.memory_top_k <= 0:
+        return update
+    # First red run: this is the episode the graph learns from, and the only
+    # moment recall is worth its tokens — later laps already carry the hints.
+    update["episode_traceback"] = output
+    update["episode_class"] = kind
+    hints = ctx.memory.context(output, k=ctx.memory_top_k, failure_class=kind)
+    if hints:
+        update["messages"] = list(state.get("messages") or []) + [{"role": "user", "content": hints}]
+        lg.info("graph.memory_recalled", chars=len(hints), failure_class=kind)
+    return update
 
 
 def route_after_observe(state: dict[str, Any]) -> str:
@@ -220,6 +238,16 @@ def report_from_state(ctx: GraphContext, state: dict[str, Any]) -> HealReport:
         )
     )
     report.events.add("graph_done", attempt=n, success=report.success)
+    if ctx.memory is not None:
+        observe(
+            ctx.memory,
+            state.get("episode_traceback") or "",
+            ctx.workspace.net_diff(),
+            failure_class=state.get("episode_class") or "",
+            success=report.success,
+            attempts=n,
+            loop="graph",
+        )
     return report
 
 
@@ -269,15 +297,26 @@ def heal_with_graph(
     checkpointer: Any = None,
     thread_id: str = "heal",
     on_event: Callable[[str, dict[str, Any]], None] | None = None,
+    memory: Any = None,
+    classifier: Any = None,
+    memory_top_k: int = 3,
 ) -> HealReport:
+    ws = workspace or Workspace(source.parent)
+    if getattr(ws, "memory", None) is None:
+        ws.memory = memory
+    if getattr(ws, "classifier", None) is None:
+        ws.classifier = classifier
     ctx = GraphContext(
         source=source,
         test=test,
         planner=planner,
-        workspace=workspace or Workspace(source.parent),
+        workspace=ws,
         registry=registry or default_registry(),
         approve_mutations=approve_mutations,
         mutation_approver=mutation_approver,
+        memory=getattr(ws, "memory", None),
+        classifier=getattr(ws, "classifier", None),
+        memory_top_k=memory_top_k,
     )
     start = initial_state(source, test, max_steps)
 

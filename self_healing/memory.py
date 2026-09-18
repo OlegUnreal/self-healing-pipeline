@@ -16,10 +16,20 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Iterable, Sequence
 
-import numpy as np
+# The core pipeline imports `observe` from this module, so the ml extra has to stay
+# optional at import time: a stdlib-only install gets a memory that says "unavailable"
+# rather than an ImportError in the middle of a repair run.
+try:
+    import numpy as np
 
-from .embeddings import HashingEmbedder, build_embedder
-from .vector_store import FlatIndex, IvfIndex, mmr
+    from .embeddings import HashingEmbedder, build_embedder
+    from .vector_store import FlatIndex, IvfIndex, mmr
+
+    _ML_IMPORT_ERROR = ""
+except ImportError as exc:  # pragma: no cover - depends on the installed extra
+    np = None
+    HashingEmbedder = build_embedder = FlatIndex = IvfIndex = mmr = None
+    _ML_IMPORT_ERROR = str(exc)
 
 log = logging.getLogger("self_healing.memory")
 
@@ -101,6 +111,8 @@ class RepairMemory:
         dim: int = 96,
         ivf_threshold: int = IVF_THRESHOLD,
     ) -> None:
+        if np is None:
+            raise ImportError(f"repair memory needs the ml extra ({_ML_IMPORT_ERROR})")
         self.path = str(path)
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
@@ -277,6 +289,21 @@ class RepairMemory:
         body = "\n\n".join(h.as_prompt() for h in hits)
         return f"Similar past repairs (best first):\n{body}"
 
+    def context(self, query: str, *, k: int = 3, failure_class: str | None = None) -> str:
+        """Recall for the prompt, degrading to no hints instead of an exception.
+
+        The store is an accelerator: a locked database, a half-written index or a
+        missing optional dependency has to leave the planner with a plain
+        traceback, which is exactly what it had before memory existed.
+        """
+        if not (query or "").strip() or k <= 0:
+            return ""
+        try:
+            return self.prompt_block(query, k, failure_class=failure_class)
+        except Exception as exc:  # pragma: no cover - depends on the host's sqlite/fs
+            log.warning("recall skipped", extra={"error": str(exc)})
+            return ""
+
     # ------------------------------------------------------------- introspection
     def stats(self) -> dict:
         rows = self.conn.execute("SELECT COUNT(*) n, SUM(success) s, AVG(attempts) a FROM repairs").fetchone()
@@ -353,3 +380,52 @@ def seed_memory(memory: RepairMemory, records: Sequence[RepairRecord] | None = N
         memory.bump(str(item["failure_class"]), success=bool(item["success"]))
         count += 1
     return count
+
+
+def observe(
+    memory: RepairMemory | None,
+    traceback: str,
+    diff: str,
+    *,
+    failure_class: str,
+    success: bool,
+    attempts: int = 1,
+    **meta,
+) -> None:
+    """Store one verdict. Shared by the three loops so none of them re-implements it.
+
+    Both the write and the counter bump are swallowed on purpose: learning that a
+    repair failed is worth having, but not at the price of the run that is already
+    green and about to return.
+    """
+    if memory is None or not (traceback or "").strip() or not (diff or "").strip():
+        return
+    try:
+        memory.record(
+            traceback, diff, failure_class=failure_class or "unknown", success=success,
+            attempts=attempts, **meta,
+        )
+        memory.bump(failure_class or "unknown", success=success)
+    except Exception as exc:  # pragma: no cover - depends on the host's sqlite/fs
+        log.warning("memory write skipped", extra={"error": str(exc)})
+
+
+def open_memory(settings, *, seed: bool = True) -> RepairMemory | None:
+    """Build the episodic store from Settings, or answer None and change nothing.
+
+    Memory is opt-in because it pulls in numpy. An empty store is seeded with the
+    shipped repair examples, so the first demo run already has something to recall.
+    """
+    if not getattr(settings, "use_ml", False):
+        return None
+    try:
+        memory = RepairMemory(getattr(settings, "memory_path", ":memory:"))
+    except Exception as exc:  # numpy/scipy missing, or the path is not writable
+        log.warning("memory disabled", extra={"error": str(exc), "path": str(getattr(settings, "memory_path", ""))})
+        return None
+    if seed and len(memory) == 0:
+        try:
+            seed_memory(memory)
+        except Exception as exc:  # pragma: no cover - corpus is data, not logic
+            log.warning("memory seeding skipped", extra={"error": str(exc)})
+    return memory

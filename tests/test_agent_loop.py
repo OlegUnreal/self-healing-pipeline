@@ -46,7 +46,7 @@ def test_heal_survives_verify_crash(tmp_path, monkeypatch):
     src = tmp_path / "x.py"
     src.write_text("x = 1\n")
 
-    def boom_verify(_test: str, timeout: float = 5.0, cwd=None, memory_mb: int = 256):
+    def boom_verify(_test: str, timeout: float = 5.0, cwd=None, memory_mb: int = 256, classifier=None):
         raise RuntimeError("verifier down")
 
     monkeypatch.setattr("self_healing.agent.verify", boom_verify)
