@@ -47,7 +47,7 @@ def banner(name):
 
 PKG_TEST = """\
 from app import banner
-assert banner("<x>") == "<x>"
+assert banner("<x>") == "&lt;x&gt;"
 print("ok")
 """
 
