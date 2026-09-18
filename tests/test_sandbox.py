@@ -32,3 +32,26 @@ def test_never_raises_on_host_error(monkeypatch):
     assert r.exit_code == 126
     assert "permission denied" in r.error
     subprocess.run = real_run
+
+
+def test_memory_cap_refuses_a_runaway_allocation():
+    """`resource.setrlimit` has no Windows twin, so this fails loudly on whichever
+    platform stops enforcing the cap - silently running uncapped was the bug."""
+    probe = "print('alive'); x = bytearray(1024 * 1024 * 1024); print('allocated', len(x))"
+    r = run_code(probe, memory_mb=256)
+    assert "alive" in r.stdout, f"child never started: {r.stderr[-300:]}"
+    assert "allocated" not in r.stdout
+    assert "MemoryError" in r.stderr
+
+
+def test_memory_cap_is_inherited_by_grandchildren():
+    probe = (
+        "import subprocess, sys\n"
+        "p = subprocess.run([sys.executable, '-c', 'x = bytearray(1024*1024*1024)'],\n"
+        "                   capture_output=True, text=True)\n"
+        "print('exit', p.returncode)\n"
+        "print(p.stderr.strip().splitlines()[-1] if p.stderr.strip() else 'no error')\n"
+    )
+    r = run_code(probe, memory_mb=256)
+    assert r.exit_code == 0, r.stderr[-300:]
+    assert "MemoryError" in r.stdout
