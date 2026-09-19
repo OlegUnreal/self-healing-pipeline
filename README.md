@@ -73,7 +73,7 @@ python -m self_healing \
 
 cp .env.example .env
 python -m self_healing --demo-llm
-pytest -q
+pytest -q                              # 153 passed
 ```
 
 Optional LangGraph runtime:
@@ -147,3 +147,5 @@ ladder is weakest (chained tracebacks: model macro-F1 0.7315 vs rules
 ## License
 
 MIT. See [`LICENSE`](LICENSE).
+
+*Last updated: 2026-09-19*
